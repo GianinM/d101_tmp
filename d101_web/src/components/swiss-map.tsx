@@ -12,6 +12,7 @@ import {
 import "cesium/Build/Cesium/Widgets/widgets.css"
 import { LV95, WGS84 } from "@swissgeo/coordinates"
 
+import { addOsmTransportLayer } from "@/lib/osm-transport-layer"
 import { cn } from "@/lib/utils"
 
 const TERRAIN_URL = "https://3d.geo.admin.ch/ch.swisstopo.terrain.3d/v1/"
@@ -34,6 +35,7 @@ export function SwissMap({ className }: { className?: string }) {
     if (!container) return
 
     let viewer: Viewer | undefined
+    let removeOsmLayer: (() => void) | undefined
     // Setup is async: if the component unmounts before it finishes
     // (e.g. React StrictMode double-mount), skip or undo the work.
     let cancelled = false
@@ -73,6 +75,9 @@ export function SwissMap({ className }: { className?: string }) {
         },
       })
 
+      // Roads and railways from OpenStreetMap, loaded around the camera
+      removeOsmLayer = addOsmTransportLayer(viewer)
+
       // Add buildings
       const swissBuildings = await Cesium3DTileset.fromUrl(BUILDINGS_URL)
       if (cancelled || !viewer || viewer.isDestroyed()) {
@@ -88,6 +93,7 @@ export function SwissMap({ className }: { className?: string }) {
 
     return () => {
       cancelled = true
+      removeOsmLayer?.()
       if (viewer && !viewer.isDestroyed()) viewer.destroy()
     }
   }, [])
