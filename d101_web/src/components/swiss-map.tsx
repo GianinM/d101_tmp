@@ -6,13 +6,16 @@ import {
   ImageryLayer,
   Math as CesiumMath,
   Rectangle,
+  ScreenSpaceEventHandler,
+  ScreenSpaceEventType,
   UrlTemplateImageryProvider,
   Viewer,
 } from "cesium"
 import "cesium/Build/Cesium/Widgets/widgets.css"
 import { LV95, WGS84 } from "@swissgeo/coordinates"
 
-import { addOsmTransportLayer } from "@/lib/osm-transport-layer"
+import { OsmTransportLayer } from "@/lib/osm/osm-transport-layer"
+import type { TransportFeature } from "@/lib/osm/transport-feature"
 import { cn } from "@/lib/utils"
 
 const TERRAIN_URL = "https://3d.geo.admin.ch/ch.swisstopo.terrain.3d/v1/"
@@ -27,15 +30,27 @@ const imageryRectangle = swissBounds
   ? Rectangle.fromDegrees(...swissBounds.flatten)
   : undefined
 
-export function SwissMap({ className }: { className?: string }) {
+type SwissMapProps = {
+  className?: string
+  /** Called with the road or railway clicked on, or undefined for empty space */
+  onFeatureClick?: (feature: TransportFeature | undefined) => void
+}
+
+export function SwissMap({ className, onFeatureClick }: SwissMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // Keep the latest callback without re-creating the viewer when it changes
+  const onFeatureClickRef = useRef(onFeatureClick)
+  useEffect(() => {
+    onFeatureClickRef.current = onFeatureClick
+  })
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
 
     let viewer: Viewer | undefined
-    let removeOsmLayer: (() => void) | undefined
+    let transportLayer: OsmTransportLayer | undefined
+    let clickHandler: ScreenSpaceEventHandler | undefined
     // Setup is async: if the component unmounts before it finishes
     // (e.g. React StrictMode double-mount), skip or undo the work.
     let cancelled = false
@@ -76,7 +91,19 @@ export function SwissMap({ className }: { className?: string }) {
       })
 
       // Roads and railways from OpenStreetMap, loaded around the camera
-      removeOsmLayer = addOsmTransportLayer(viewer)
+      const layer = new OsmTransportLayer(viewer)
+      transportLayer = layer
+
+      // Click a road or railway to inspect its object
+      clickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas)
+      clickHandler.setInputAction(
+        ({ position }: ScreenSpaceEventHandler.PositionedEvent) => {
+          const feature = layer.pick(position)
+          if (feature) console.log(feature.describe(), feature)
+          onFeatureClickRef.current?.(feature)
+        },
+        ScreenSpaceEventType.LEFT_CLICK
+      )
 
       // Add buildings
       const swissBuildings = await Cesium3DTileset.fromUrl(BUILDINGS_URL)
@@ -93,7 +120,8 @@ export function SwissMap({ className }: { className?: string }) {
 
     return () => {
       cancelled = true
-      removeOsmLayer?.()
+      clickHandler?.destroy()
+      transportLayer?.destroy()
       if (viewer && !viewer.isDestroyed()) viewer.destroy()
     }
   }, [])
